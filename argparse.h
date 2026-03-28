@@ -421,14 +421,10 @@ void argp_ctx_print_options(const ArgParse_Context *ctx, FILE *stream)
 
 bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
 {
+    if (!ctx) return false;
     argp__clear_error(ctx);
 
-    if (!ctx) {
-        argp__set_errorf(ctx, "parser ctx is NULL");
-        return false;
-    }
-
-    if (!argv || argc <= 0) {
+    if (!argv || argc <= 0 || !argv[0]) {
         argp__set_errorf(ctx, "invalid argv input");
         return false;
     }
@@ -495,11 +491,14 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
                 is_long ? arg->spec.long_opt : arg->spec.short_opt;
             if (!opt) continue;
 
-            if ((is_long && long_eq) ? (strncmp(name, opt, name_len) != 0 ||
-                                        opt[name_len] != '\0')
-                                     : strcmp(name, opt) != 0) {
-                continue;
+            bool match;
+            if (is_long && long_eq) {
+                match =
+                    strncmp(name, opt, name_len) == 0 && opt[name_len] == '\0';
+            } else {
+                match = strcmp(name, opt) == 0;
             }
+            if (!match) continue;
 
             // Consume value from next token if not embedded
             ctx->current_arg = arg;
