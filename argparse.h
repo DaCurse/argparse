@@ -110,6 +110,7 @@ ArgParse_Arg *argp_ctx_register_default(ArgParse_Context *ctx,
 #include <string.h>
 
 #define ARGPARSE_INITIAL_CAPACITY (8)
+#define ARGPARSE_MAX_OPTION_LEN (64)
 
 ArgParse_Context g_argp_ctx = {0};
 
@@ -286,12 +287,16 @@ ArgParse_Arg *argp_ctx_register(ArgParse_Context *ctx,
                                 ArgParse_Type type,
                                 void *dest)
 {
-    ArgParse_Arg arg = {.spec = spec, .type = type};
-
     if (!ctx) {
         argp__set_errorf(ctx, "parser ctx is NULL");
         return NULL;
     }
+
+    assert(!spec.short_opt ||
+           strlen(spec.short_opt) <= ARGPARSE_MAX_OPTION_LEN);
+    assert(!spec.long_opt || strlen(spec.long_opt) <= ARGPARSE_MAX_OPTION_LEN);
+
+    ArgParse_Arg arg = {.spec = spec, .type = type};
 
     if (!dest) {
         dest = argp__storage_new(type);
@@ -520,7 +525,10 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
         if ((!is_long && name[0] == '\0') ||
             (is_long && !long_eq && name[0] == '\0') ||
             (is_long && long_eq && name_len == 0)) {
-            argp__set_errorf(ctx, "malformed option '%s'", token);
+            argp__set_errorf(ctx,
+                             "malformed option '%.*s'",
+                             ARGPARSE_MAX_OPTION_LEN,
+                             token);
             return false;
         }
 
@@ -546,7 +554,8 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             if (!value) {
                 if (i + 1 >= argc) {
                     argp__set_errorf(ctx,
-                                     "missing value for option '%s'",
+                                     "missing value for option '%.*s'",
+                                     ARGPARSE_MAX_OPTION_LEN,
                                      token);
                     return false;
                 }
@@ -562,7 +571,10 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             goto next_token;
         }
 
-        argp__set_errorf(ctx, "unknown option '%s'", token);
+        argp__set_errorf(ctx,
+                         "unknown option '%.*s'",
+                         ARGPARSE_MAX_OPTION_LEN,
+                         token);
         return false;
 
     next_token:;
@@ -578,11 +590,13 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             } else {
                 if (arg->spec.long_opt) {
                     argp__set_errorf(ctx,
-                                     "missing required option '--%s'",
+                                     "missing required option '--%.*s'",
+                                     ARGPARSE_MAX_OPTION_LEN,
                                      arg->spec.long_opt);
                 } else if (arg->spec.short_opt) {
                     argp__set_errorf(ctx,
-                                     "missing required option '-%s'",
+                                     "missing required option '-%.*s'",
+                                     ARGPARSE_MAX_OPTION_LEN,
                                      arg->spec.short_opt);
                 } else {
                     argp__set_errorf(ctx, "missing required option");
