@@ -5,19 +5,16 @@
 
 int main(int argc, char **argv)
 {
-    ArgParse_Context ctx = {0};
-    char **foo = argp_ctx_str(&ctx, "f", "foo", .description = "Foo");
-    char **bar = argp_ctx_str_default(&ctx, "default value", "b", "bar", "Bar");
-
-    // Can bind arguments to user defined variables
+    char **foo = argp_str("f", "foo", .description = "Foo");
+    char **bar = argp_str_default("default value", "b", "bar", "Bar");
     char *baz;
-    argp_ctx_str_var(&ctx, &baz, .long_opt = "baz", .description = "Baz");
+    argp_str_var(&baz, .long_opt = "baz", .description = "Baz");
 
-    if (!argp_ctx_parse(&ctx, argc, argv)) {
-        fprintf(stderr, "ERROR: %s\n", argp_ctx_error(&ctx));
+    if (!argp_parse(argc, argv)) {
+        fprintf(stderr, "ERROR: %s\n", argp_error());
         fprintf(stderr, "Options:\n");
-        argp_ctx_print_options(&ctx, stderr);
-        argp_ctx_free(&ctx);
+        argp_print_options(stderr);
+        argp_free();
         return 1;
     }
 
@@ -25,12 +22,14 @@ int main(int argc, char **argv)
     printf("bar=%s\n", *bar);
     printf("baz=%s\n", baz);
 
-    printf("rest (%d):", ctx.rest_argc);
-    for (int i = 0; i < ctx.rest_argc; i++) {
-        printf(" %s", ctx.rest_argv[i]);
+    int rest_argc = argp_rest_argc();
+    char **rest_argv = argp_rest_argv();
+    printf("rest (%d):", rest_argc);
+    for (int i = 0; i < rest_argc; i++) {
+        printf(" %s", rest_argv[i]);
     }
     printf("\n");
 
-    argp_ctx_free(&ctx);
+    argp_free();
     return 0;
 }

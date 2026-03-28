@@ -45,17 +45,30 @@ typedef struct {
     char error[256];
 } ArgParse_Context;
 
+extern ArgParse_Context g_argp_ctx;
+
+#define argp_str(...) argp_ctx_str(&g_argp_ctx, __VA_ARGS__)
+#define argp_str_default(default_value, ...)                                   \
+    argp_ctx_str_default(&g_argp_ctx, default_value, __VA_ARGS__)
+#define argp_str_var(dest, ...) argp_ctx_str_var(&g_argp_ctx, dest, __VA_ARGS__)
+#define argp_str_default_var(dest, default_value, ...)                         \
+    argp_ctx_str_default_var(&g_argp_ctx, dest, default_value, __VA_ARGS__)
+
+bool argp_parse(int argc, char **argv);
+const char *argp_error();
+int argp_rest_argc();
+char **argp_rest_argv();
+void argp_print_options(FILE *stream);
+void argp_free();
+
 #define argp_ctx_str(ctx, ...)                                                 \
     argp_ctx_str_ex((ctx), (ArgParse_ArgSpec){__VA_ARGS__})
-
 #define argp_ctx_str_default(ctx, default_value, ...)                          \
     argp_ctx_str_default_ex((ctx),                                             \
                             (ArgParse_ArgSpec){__VA_ARGS__},                   \
                             (default_value))
-
 #define argp_ctx_str_var(ctx, dest, ...)                                       \
     argp_ctx_str_var_ex((ctx), (ArgParse_ArgSpec){__VA_ARGS__}, (dest))
-
 #define argp_ctx_str_default_var(ctx, dest, default_value, ...)                \
     argp_ctx_str_default_var_ex((ctx),                                         \
                                 (ArgParse_ArgSpec){__VA_ARGS__},               \
@@ -98,6 +111,8 @@ ArgParse_Arg *argp_ctx_register_default(ArgParse_Context *ctx,
 
 #define ARGPARSE_INITIAL_CAPACITY (8)
 
+ArgParse_Context g_argp_ctx = {0};
+
 // Private API
 static ArgParse_Arg *argp__append(ArgParse_Args *args, ArgParse_Arg arg);
 static void *argp__storage_new(ArgParse_Type type);
@@ -109,6 +124,32 @@ static bool
 argp__set_value(ArgParse_Context *ctx, ArgParse_Arg *arg, const char *value);
 static bool argp__apply_default(ArgParse_Context *ctx, ArgParse_Arg *arg);
 static void argp__print_default(FILE *stream, const ArgParse_Arg *arg);
+
+bool argp_parse(int argc, char **argv)
+{
+    return argp_ctx_parse(&g_argp_ctx, argc, argv);
+}
+
+const char *argp_error() { return argp_ctx_error(&g_argp_ctx); }
+
+int argp_rest_argc()
+{
+    assert(g_argp_ctx.is_parsed);
+    return g_argp_ctx.rest_argc;
+}
+
+char **argp_rest_argv()
+{
+    assert(g_argp_ctx.is_parsed);
+    return g_argp_ctx.rest_argv;
+}
+
+void argp_print_options(FILE *stream)
+{
+    argp_ctx_print_options(&g_argp_ctx, stream);
+}
+
+void argp_free() { argp_ctx_free(&g_argp_ctx); }
 
 static ArgParse_Arg *argp__append(ArgParse_Args *args, ArgParse_Arg arg)
 {
