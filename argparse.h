@@ -180,19 +180,11 @@ void argp_free() { argp_ctx_free(&g_argp_ctx); }
 
 static ArgParse_Arg *argp__append(ArgParse_Args *args, ArgParse_Arg arg)
 {
-    size_t new_capacity;
-    ArgParse_Arg *new_items;
-
-    if (args->capacity == 0) {
-        new_capacity = ARGPARSE_INITIAL_CAPACITY;
-    } else if (args->count >= args->capacity) {
-        new_capacity = args->capacity * 2;
-    } else {
-        new_capacity = args->capacity;
-    }
-
-    if (new_capacity != args->capacity) {
-        new_items = realloc(args->items, new_capacity * sizeof(*args->items));
+    if (args->count >= args->capacity) {
+        size_t new_capacity = args->capacity == 0 ? ARGPARSE_INITIAL_CAPACITY
+                                                  : args->capacity * 2;
+        ArgParse_Arg *new_items =
+            realloc(args->items, new_capacity * sizeof(*args->items));
         if (!new_items) return NULL;
 
         args->items = new_items;
