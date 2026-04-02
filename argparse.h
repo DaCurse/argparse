@@ -18,6 +18,7 @@ typedef struct {
     const char *short_opt;
     const char *long_opt;
     const char *description;
+    const char *varname;
 } ArgParse_ArgSpec;
 
 typedef struct {
@@ -141,8 +142,6 @@ ArgParse_Context g_argp_ctx = {0};
 // Private API
 static ArgParse_Arg *argp__append(ArgParse_Args *args, ArgParse_Arg arg);
 static void *argp__alloc_dest(ArgParse_Type type);
-static void
-argp__option_name(const ArgParse_Arg *arg, char *buffer, size_t buffer_size);
 static void argp__set_errorf(ArgParse_Context *ctx, const char *fmt, ...)
     ARGPARSE_PRINTF_LIKE(2, 3);
 static void argp__clear_error(ArgParse_Context *ctx);
@@ -207,30 +206,10 @@ static void *argp__alloc_dest(ArgParse_Type type)
     return NULL;
 }
 
-static void
-argp__option_name(const ArgParse_Arg *arg, char *buffer, size_t buffer_size)
-{
-    if (!buffer || buffer_size == 0) {
-        return;
-    }
-
-    if (!arg) {
-        snprintf(buffer, buffer_size, "<unknown>");
-        return;
-    } else if (arg->spec.long_opt) {
-        snprintf(buffer, buffer_size, "--%s", arg->spec.long_opt);
-    } else if (arg->spec.short_opt) {
-        snprintf(buffer, buffer_size, "-%s", arg->spec.short_opt);
-    } else {
-        snprintf(buffer, buffer_size, "<unnamed>");
-    }
-}
-
 static void argp__set_errorf(ArgParse_Context *ctx, const char *fmt, ...)
 {
     va_list args;
-    char base_error[200];
-    char option[sizeof(ctx->error) - sizeof(base_error) - 1];
+    char base_error[256];
 
     if (!ctx) return;
 
@@ -239,8 +218,14 @@ static void argp__set_errorf(ArgParse_Context *ctx, const char *fmt, ...)
     va_end(args);
 
     if (ctx->current_arg) {
-        argp__option_name(ctx->current_arg, option, sizeof(option));
-        snprintf(ctx->error, sizeof(ctx->error), "%s: %s", option, base_error);
+        snprintf(ctx->error,
+                 sizeof(ctx->error),
+                 "%s%s: %s",
+                 ctx->current_arg->spec.long_opt ? "--" : "-",
+                 ctx->current_arg->spec.long_opt
+                     ? ctx->current_arg->spec.long_opt
+                     : ctx->current_arg->spec.short_opt,
+                 base_error);
     } else {
         snprintf(ctx->error, sizeof(ctx->error), "%s", base_error);
     }
@@ -493,10 +478,22 @@ static void argp__print_default(FILE *stream, const ArgParse_Arg *arg)
                 "\"%s\"",
                 arg->default_value.string ? arg->default_value.string : "");
         break;
-    case ARGPARSE_TYPE_BOOL: assert(0 && "UNREACHABLE: bool flags don't print default`");
+    case ARGPARSE_TYPE_BOOL:
+        assert(0 && "UNREACHABLE: bool flags don't print default");
     }
 
     fputc(')', stream);
+}
+
+static const char *argp__default_varname(const ArgParse_Arg *arg)
+{
+    switch (arg->type) {
+    case ARGPARSE_TYPE_STRING: return "string";
+    case ARGPARSE_TYPE_BOOL: return NULL;
+    }
+
+    assert(0 && "UNREACHABLE: ArgParse_Type");
+    return NULL;
 }
 
 void argp_ctx_print_options(const ArgParse_Context *ctx, FILE *stream)
@@ -504,51 +501,34 @@ void argp_ctx_print_options(const ArgParse_Context *ctx, FILE *stream)
     if (!ctx) return;
     if (!stream) stream = stdout;
 
-    // Calculate max line width to align options
-    int max_w = 0;
-    for (size_t i = 0; i < ctx->args.count; i++) {
-        const ArgParse_Arg *arg = &ctx->args.items[i];
-        int w = 0;
-        if (arg->spec.short_opt && arg->spec.long_opt) {
-            w = snprintf(NULL,
-                         0,
-                         "-%s, --%s",
-                         arg->spec.short_opt,
-                         arg->spec.long_opt);
-        } else if (arg->spec.short_opt) {
-            w = snprintf(NULL, 0, "-%s", arg->spec.short_opt);
-        } else if (arg->spec.long_opt) {
-            w = snprintf(NULL, 0, "--%s", arg->spec.long_opt);
-        }
-
-        if (w > max_w) {
-            max_w = w;
-        }
-    }
-
     // Print each option, padded to align descriptions
     for (size_t i = 0; i < ctx->args.count; i++) {
         const ArgParse_Arg *arg = &ctx->args.items[i];
-        char buf[128];
-        buf[0] = '\0';
+        const char *varname =
+            arg->spec.varname ? arg->spec.varname : argp__default_varname(arg);
 
-        if (arg->spec.short_opt && arg->spec.long_opt) {
-            snprintf(buf,
-                     sizeof(buf),
-                     "-%s, --%s",
-                     arg->spec.short_opt,
-                     arg->spec.long_opt);
-        } else if (arg->spec.short_opt) {
-            snprintf(buf, sizeof(buf), "-%s", arg->spec.short_opt);
-        } else if (arg->spec.long_opt) {
-            snprintf(buf, sizeof(buf), "--%s", arg->spec.long_opt);
+        if (arg->spec.short_opt) {
+            fprintf(stream, "-%s", arg->spec.short_opt);
+
+            if (arg->spec.long_opt) {
+                fprintf(stream, ", ");
+            }
+        }
+        if (arg->spec.long_opt) {
+            fprintf(stream, "--%s", arg->spec.long_opt);
+        }
+        if (varname) {
+            fprintf(stream, " <%s>", varname);
         }
 
-        fprintf(stream, "  %-*s", max_w, buf);
+        if (arg->spec.description || arg->has_default) {
+            fprintf(stream, "\n    ");
+        }
         if (arg->spec.description) {
-            fprintf(stream, "  %s", arg->spec.description);
+            fprintf(stream, "%s", arg->spec.description);
         }
         argp__print_default(stream, arg);
+
         fputc('\n', stream);
     }
 }
@@ -609,10 +589,8 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             name = token + 1;
         }
 
-        // Reject empty option names
-        if ((!is_long && name[0] == '\0') ||
-            (is_long && !long_eq && name[0] == '\0') ||
-            (is_long && long_eq && name_len == 0)) {
+        // Reject empty option names (e.g. --=val)
+        if (is_long && long_eq && name_len == 0) {
             argp__set_errorf(ctx, "malformed option %s", token);
             return false;
         }

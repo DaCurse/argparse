@@ -6,7 +6,7 @@
 int main(int argc, char **argv)
 {
     char **foo = argp_str(.long_opt = "foo", .description = "Foo");
-    char **bar = argp_str_default("default value", "b", "bar", "Bar");
+    char **bar = argp_str_default("default value", "b", "bar", "Bar", "bar");
     bool *qux = argp_bool(.long_opt = "qux", "Qux?");
 
     char *baz;
