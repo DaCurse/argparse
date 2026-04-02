@@ -44,7 +44,7 @@ typedef struct {
     const ArgParse_Arg *current_arg;
     int rest_argc;
     char **rest_argv;
-    char error[256];
+    char error[512];
 } ArgParse_Context;
 
 extern ArgParse_Context g_argp_ctx;
@@ -130,6 +130,8 @@ ArgParse_Arg *argp_ctx_register_default(ArgParse_Context *ctx,
 #define ARGPARSE_MAX_OPTION_LEN (64)
 #endif
 
+#define UNREACHABLE(msg) assert(0 && "UNREACHABLE: "msg)
+
 #if defined(__GNUC__) || defined(__clang__)
 #define ARGPARSE_PRINTF_LIKE(fmt_index, first_arg)                             \
     __attribute__((format(printf, fmt_index, first_arg)))
@@ -202,7 +204,7 @@ static void *argp__alloc_dest(ArgParse_Type type)
     case ARGPARSE_TYPE_BOOL: return calloc(1, sizeof(bool));
     }
 
-    assert(0 && "UNREACHABLE: ArgumentType");
+    UNREACHABLE("ArgumentType");
     return NULL;
 }
 
@@ -276,7 +278,7 @@ argp__set_value(ArgParse_Context *ctx, ArgParse_Arg *arg, const char *value)
     }
 
     argp__set_errorf(ctx, "unsupported argument type");
-    assert(0 && "UNREACHABLE: ArgumentType");
+    UNREACHABLE("ArgumentType");
     return false;
 }
 
@@ -294,7 +296,7 @@ static bool argp__apply_default(ArgParse_Context *ctx, ArgParse_Arg *arg)
     }
     }
 
-    assert(0 && "UNREACHABLE: ArgumentType");
+    UNREACHABLE("ArgumentType");
     return false;
 }
 
@@ -479,7 +481,7 @@ static void argp__print_default(FILE *stream, const ArgParse_Arg *arg)
                 arg->default_value.string ? arg->default_value.string : "");
         break;
     case ARGPARSE_TYPE_BOOL:
-        assert(0 && "UNREACHABLE: bool flags don't print default");
+        UNREACHABLE("bool flags don't print default");
     }
 
     fputc(')', stream);
@@ -492,7 +494,7 @@ static const char *argp__default_varname(const ArgParse_Arg *arg)
     case ARGPARSE_TYPE_BOOL: return NULL;
     }
 
-    assert(0 && "UNREACHABLE: ArgParse_Type");
+    UNREACHABLE("ArgParse_Type");
     return NULL;
 }
 
@@ -695,6 +697,7 @@ void argp_ctx_free(ArgParse_Context *ctx)
     ctx->error[0] = '\0';
 }
 
+#undef UNREACHABLE
 #endif // ARGPARSE_IMPLEMENTATION
 
 #endif // ARGPARSE_H
