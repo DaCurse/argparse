@@ -5,8 +5,10 @@
 
 int main(int argc, char **argv)
 {
-    char **foo = argp_str("f", "foo", .description = "Foo");
+    char **foo = argp_str(.long_opt = "foo", .description = "Foo");
     char **bar = argp_str_default("default value", "b", "bar", "Bar");
+    bool *qux = argp_bool(.long_opt = "qux", "Qux?");
+
     char *baz;
     argp_str_var(&baz, .long_opt = "baz", .description = "Baz");
 
@@ -21,6 +23,7 @@ int main(int argc, char **argv)
     printf("foo=%s\n", *foo);
     printf("bar=%s\n", *bar);
     printf("baz=%s\n", baz);
+    printf("qux=%d\n", *qux);
 
     int rest_argc = argp_rest_argc();
     char **rest_argv = argp_rest_argv();

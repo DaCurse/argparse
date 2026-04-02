@@ -7,6 +7,7 @@
 
 typedef enum {
     ARGPARSE_TYPE_STRING,
+    ARGPARSE_TYPE_BOOL,
 } ArgParse_Type;
 
 typedef union {
@@ -54,6 +55,10 @@ extern ArgParse_Context g_argp_ctx;
 #define argp_str_default_var(dest, default_value, ...)                         \
     argp_ctx_str_default_var(&g_argp_ctx, dest, default_value, __VA_ARGS__)
 
+#define argp_bool(...) argp_ctx_bool(&g_argp_ctx, __VA_ARGS__)
+#define argp_bool_var(dest, ...)                                               \
+    argp_ctx_bool_var(&g_argp_ctx, dest, __VA_ARGS__)
+
 bool argp_parse(int argc, char **argv);
 const char *argp_error();
 int argp_rest_argc();
@@ -75,6 +80,11 @@ void argp_free();
                                 (dest),                                        \
                                 (default_value))
 
+#define argp_ctx_bool(ctx, ...)                                                \
+    argp_ctx_bool_ex((ctx), (ArgParse_ArgSpec){__VA_ARGS__})
+#define argp_ctx_bool_var(ctx, dest, ...)                                      \
+    argp_ctx_bool_var_ex((ctx), (ArgParse_ArgSpec){__VA_ARGS__}, (dest))
+
 char **argp_ctx_str_ex(ArgParse_Context *ctx, ArgParse_ArgSpec spec);
 char **argp_ctx_str_default_ex(ArgParse_Context *ctx,
                                ArgParse_ArgSpec spec,
@@ -86,6 +96,11 @@ bool argp_ctx_str_default_var_ex(ArgParse_Context *ctx,
                                  ArgParse_ArgSpec spec,
                                  char **dest,
                                  const char *default_value);
+
+bool *argp_ctx_bool_ex(ArgParse_Context *ctx, ArgParse_ArgSpec spec);
+bool argp_ctx_bool_var_ex(ArgParse_Context *ctx,
+                          ArgParse_ArgSpec spec,
+                          bool *dest);
 
 bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv);
 const char *argp_ctx_error(const ArgParse_Context *ctx);
@@ -114,19 +129,28 @@ ArgParse_Arg *argp_ctx_register_default(ArgParse_Context *ctx,
 #define ARGPARSE_MAX_OPTION_LEN (64)
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define ARGPARSE_PRINTF_LIKE(fmt_index, first_arg)                             \
+    __attribute__((format(printf, fmt_index, first_arg)))
+#else
+#define ARGPARSE_PRINTF_LIKE(fmt_index, first_arg)
+#endif
+
 ArgParse_Context g_argp_ctx = {0};
 
 // Private API
 static ArgParse_Arg *argp__append(ArgParse_Args *args, ArgParse_Arg arg);
-static void *argp__storage_new(ArgParse_Type type);
+static void *argp__alloc_dest(ArgParse_Type type);
 static void
 argp__option_name(const ArgParse_Arg *arg, char *buffer, size_t buffer_size);
-static void argp__set_errorf(ArgParse_Context *ctx, const char *fmt, ...);
+static void argp__set_errorf(ArgParse_Context *ctx, const char *fmt, ...)
+    ARGPARSE_PRINTF_LIKE(2, 3);
 static void argp__clear_error(ArgParse_Context *ctx);
 static bool
 argp__set_value(ArgParse_Context *ctx, ArgParse_Arg *arg, const char *value);
 static bool argp__apply_default(ArgParse_Context *ctx, ArgParse_Arg *arg);
 static void argp__print_default(FILE *stream, const ArgParse_Arg *arg);
+static const char *argp__default_varname(const ArgParse_Arg *arg);
 
 bool argp_parse(int argc, char **argv)
 {
@@ -180,10 +204,11 @@ static ArgParse_Arg *argp__append(ArgParse_Args *args, ArgParse_Arg arg)
     return new_arg;
 }
 
-static void *argp__storage_new(ArgParse_Type type)
+static void *argp__alloc_dest(ArgParse_Type type)
 {
     switch (type) {
     case ARGPARSE_TYPE_STRING: return calloc(1, sizeof(char *));
+    case ARGPARSE_TYPE_BOOL: return calloc(1, sizeof(bool));
     }
 
     assert(0 && "UNREACHABLE: ArgumentType");
@@ -244,8 +269,13 @@ const char *argp_ctx_error(const ArgParse_Context *ctx)
 static bool
 argp__set_value(ArgParse_Context *ctx, ArgParse_Arg *arg, const char *value)
 {
-    if (!arg || !value) {
-        argp__set_errorf(ctx, "invalid argument assignment");
+    if (!arg) {
+        argp__set_errorf(ctx, "parser reached an invalid state");
+        return false;
+    }
+
+    if (!value) {
+        argp__set_errorf(ctx, "option requires a value");
         return false;
     }
 
@@ -263,6 +293,9 @@ argp__set_value(ArgParse_Context *ctx, ArgParse_Arg *arg, const char *value)
         *dest = copy;
         return true;
     }
+    case ARGPARSE_TYPE_BOOL:
+        argp__set_errorf(ctx, "option does not take a value");
+        return false;
     }
 
     argp__set_errorf(ctx, "unsupported argument type");
@@ -277,6 +310,10 @@ static bool argp__apply_default(ArgParse_Context *ctx, ArgParse_Arg *arg)
         const char *value = arg->default_value.string;
         if (!value) value = "";
         return argp__set_value(ctx, arg, value);
+    }
+    case ARGPARSE_TYPE_BOOL: {
+        *(bool *)arg->dest = false;
+        return true;
     }
     }
 
@@ -294,14 +331,46 @@ ArgParse_Arg *argp_ctx_register(ArgParse_Context *ctx,
         return NULL;
     }
 
+    assert((spec.short_opt && spec.short_opt[0] != '\0') ||
+           (spec.long_opt && spec.long_opt[0] != '\0'));
+
+    if (spec.short_opt && spec.short_opt[0] == '\0') {
+        argp__set_errorf(ctx, "short option name must not be empty");
+        return NULL;
+    }
+
+    if (spec.long_opt && spec.long_opt[0] == '\0') {
+        argp__set_errorf(ctx, "long option name must not be empty");
+        return NULL;
+    }
+
+    if (!spec.short_opt && !spec.long_opt) {
+        argp__set_errorf(ctx, "option must define short_opt or long_opt");
+        return NULL;
+    }
+
     assert(!spec.short_opt ||
            strlen(spec.short_opt) <= ARGPARSE_MAX_OPTION_LEN);
     assert(!spec.long_opt || strlen(spec.long_opt) <= ARGPARSE_MAX_OPTION_LEN);
 
+    if (spec.short_opt && strlen(spec.short_opt) > ARGPARSE_MAX_OPTION_LEN) {
+        argp__set_errorf(ctx,
+                         "short option name exceeds %d characters",
+                         ARGPARSE_MAX_OPTION_LEN);
+        return NULL;
+    }
+
+    if (spec.long_opt && strlen(spec.long_opt) > ARGPARSE_MAX_OPTION_LEN) {
+        argp__set_errorf(ctx,
+                         "long option name exceeds %d characters",
+                         ARGPARSE_MAX_OPTION_LEN);
+        return NULL;
+    }
+
     ArgParse_Arg arg = {.spec = spec, .type = type};
 
     if (!dest) {
-        dest = argp__storage_new(type);
+        dest = argp__alloc_dest(type);
         if (!dest) {
             argp__set_errorf(ctx, "out of memory");
             return NULL;
@@ -311,6 +380,7 @@ ArgParse_Arg *argp_ctx_register(ArgParse_Context *ctx,
         arg.owns_dest = false;
         switch (type) {
         case ARGPARSE_TYPE_STRING: *(char **)dest = NULL; break;
+        case ARGPARSE_TYPE_BOOL: *(bool *)dest = false; break;
         }
     }
 
@@ -396,9 +466,32 @@ bool argp_ctx_str_default_var_ex(ArgParse_Context *ctx,
     return arg != NULL;
 }
 
+bool *argp_ctx_bool_ex(ArgParse_Context *ctx, ArgParse_ArgSpec spec)
+{
+    ArgParse_Arg *arg = argp_ctx_register(ctx, spec, ARGPARSE_TYPE_BOOL, NULL);
+    if (!arg) return NULL;
+    arg->has_default = true;
+    return (bool *)arg->dest;
+}
+
+bool argp_ctx_bool_var_ex(ArgParse_Context *ctx,
+                          ArgParse_ArgSpec spec,
+                          bool *dest)
+{
+    if (!dest) {
+        argp__set_errorf(ctx, "destination is NULL");
+        return false;
+    }
+
+    ArgParse_Arg *arg = argp_ctx_register(ctx, spec, ARGPARSE_TYPE_BOOL, dest);
+    arg->has_default = true;
+    return arg != NULL;
+}
+
 static void argp__print_default(FILE *stream, const ArgParse_Arg *arg)
 {
-    if (!arg->has_default) return;
+    // Print default for bool args is redundant
+    if (arg->type == ARGPARSE_TYPE_BOOL || !arg->has_default) return;
 
     fputs(" (default: ", stream);
 
@@ -408,6 +501,7 @@ static void argp__print_default(FILE *stream, const ArgParse_Arg *arg)
                 "\"%s\"",
                 arg->default_value.string ? arg->default_value.string : "");
         break;
+    case ARGPARSE_TYPE_BOOL: assert(0 && "UNREACHABLE: bool flags don't print default`");
     }
 
     fputc(')', stream);
@@ -527,10 +621,7 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
         if ((!is_long && name[0] == '\0') ||
             (is_long && !long_eq && name[0] == '\0') ||
             (is_long && long_eq && name_len == 0)) {
-            argp__set_errorf(ctx,
-                             "malformed option '%.*s'",
-                             ARGPARSE_MAX_OPTION_LEN,
-                             token);
+            argp__set_errorf(ctx, "malformed option %s", token);
             return false;
         }
 
@@ -551,21 +642,23 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             }
             if (!match) continue;
 
-            // Consume value from next token if not embedded
             ctx->current_arg = arg;
-            if (!value) {
+
+            // Consume value from next token if not embedded
+            if (arg->type != ARGPARSE_TYPE_BOOL && !value) {
                 if (i + 1 >= argc) {
-                    argp__set_errorf(ctx,
-                                     "missing value for option '%.*s'",
-                                     ARGPARSE_MAX_OPTION_LEN,
-                                     token);
+                    argp__set_errorf(ctx, "missing value for option");
                     return false;
                 }
 
                 value = argv[++i];
             }
 
-            if (!argp__set_value(ctx, arg, value)) return false;
+            if (arg->type == ARGPARSE_TYPE_BOOL) {
+                *(bool *)arg->dest = true;
+            } else {
+                if (!argp__set_value(ctx, arg, value)) return false;
+            }
 
             ctx->current_arg = NULL;
             arg->is_parsed = true;
@@ -573,10 +666,7 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             goto next_token;
         }
 
-        argp__set_errorf(ctx,
-                         "unknown option '%.*s'",
-                         ARGPARSE_MAX_OPTION_LEN,
-                         token);
+        argp__set_errorf(ctx, "unknown option %s", token);
         return false;
 
     next_token:;
@@ -592,16 +682,12 @@ bool argp_ctx_parse(ArgParse_Context *ctx, int argc, char **argv)
             } else {
                 if (arg->spec.long_opt) {
                     argp__set_errorf(ctx,
-                                     "missing required option '--%.*s'",
-                                     ARGPARSE_MAX_OPTION_LEN,
+                                     "missing required option --%s",
                                      arg->spec.long_opt);
                 } else if (arg->spec.short_opt) {
                     argp__set_errorf(ctx,
-                                     "missing required option '-%.*s'",
-                                     ARGPARSE_MAX_OPTION_LEN,
+                                     "missing required option -%s",
                                      arg->spec.short_opt);
-                } else {
-                    argp__set_errorf(ctx, "missing required option");
                 }
 
                 return false;
