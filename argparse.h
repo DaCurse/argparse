@@ -110,7 +110,9 @@ ArgParse_Arg *argp_ctx_register_default(ArgParse_Context *ctx,
 #include <string.h>
 
 #define ARGPARSE_INITIAL_CAPACITY (8)
+#ifndef ARGPARSE_MAX_OPTION_LEN
 #define ARGPARSE_MAX_OPTION_LEN (64)
+#endif
 
 ArgParse_Context g_argp_ctx = {0};
 
